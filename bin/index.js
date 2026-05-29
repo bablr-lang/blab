@@ -1,4 +1,4 @@
-/* global process crypto Buffer Uint8Array */
+/* global process crypto Buffer Uint8Array btoa */
 import '@bablr/agast-helpers/debug/register';
 import '@bablr/record';
 import { program } from 'commander';
@@ -24,7 +24,12 @@ import {
   printTag,
   printType,
 } from '@bablr/agast-helpers/print';
-import { buildPropertyTag, parseTag, parseTagType } from '@bablr/agast-helpers/builders';
+import {
+  buildHashTag,
+  buildPropertyTag,
+  parseTag,
+  parseTagType,
+} from '@bablr/agast-helpers/builders';
 import {
   CloseNodeTag,
   GapTag,
@@ -93,10 +98,6 @@ function* __generateCSTML(tags, options) {
       yield* ' ';
     }
 
-    if (tagType === 'Effect') {
-      continue;
-    }
-
     yield* vcsPrintTag(tag);
 
     prevTagType = tagType;
@@ -111,15 +112,13 @@ export const vcsPrintCSTML = (tags) => {
 };
 
 // TODO move this somewhere else
-export function* vcsPrint(node) {
-  let str = vcsPrintCSTML(streamFromTree(node));
-  let hash = yield wait(digest(str));
+let hashNode = async (str) => {
+  let hash = await digest(str);
 
-  return `${Array.from(new Uint8Array(hash))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .slice(0, 2)
-    .join('')}: ${str}`;
-}
+  return btoa(
+    Array.from(new Uint8Array(hash), (byte) => String.fromCodePoint(byte)).join(''),
+  ).slice(0, 4);
+};
 
 function* __init(options, rootDir) {
   const { default: language } = yield wait(import(options.language));
@@ -195,7 +194,9 @@ function* __init(options, rootDir) {
           let children = Tags.getValues(Tags.getTags(finishedNode))[1] || Tags.fromValues([]);
 
           if (Tags.getDepth(children) === 1) {
-            console.log(yield* vcsPrint(finishedNode));
+            let str = vcsPrintCSTML(streamFromTree(finishedNode));
+            let hash = yield wait(hashNode(str));
+            console.log(`${hash}: ${str}`);
           } else {
             let tree = children;
             let newTree = Tags.fromValues([]);
@@ -214,13 +215,17 @@ function* __init(options, rootDir) {
                 tree = frame.tree;
                 newTree = frame.newTree;
 
+                let str = vcsPrintCSTML(
+                  streamFromTree(buildNode(Tags.from('<__>', finishedNewTree, '</>'))),
+                );
+                let hash = yield wait(hashNode(str));
+                console.log(`${hash}: ${str}`);
+
                 let tags_ = BList.fromValues(
-                  ['__:', Tags.fromValues([]), Path.fromTag('<//>').node /*, hashTag */],
+                  ['__:', Tags.fromValues([]), Path.fromTag('<//>').node, buildHashTag(hash)],
                   1,
                 );
                 let newProperty = buildPropertyTag(tags_);
-
-                console.log(yield* vcsPrint(buildNode(Tags.from('<__>', finishedNewTree, '</>'))));
 
                 newTree = Tags.push(newProperty, newTree);
               }
