@@ -24,23 +24,19 @@ import {
   printTag,
   printType,
 } from '@bablr/agast-helpers/print';
-import {
-  buildHashTag,
-  buildPropertyTag,
-  parseTag,
-  parseTagType,
-} from '@bablr/agast-helpers/builders';
+import { buildPropertyTag, parseTag, parseTagType } from '@bablr/agast-helpers/builders';
 import {
   CloseNodeTag,
   GapTag,
   NullTag,
   OpenNodeTag,
   ReferenceTag,
+  ShiftTag,
 } from '@bablr/agast-helpers/symbols';
 import { buildNode, Path, propertyIsFull } from '@bablr/agast-helpers/path';
 import { m } from '@bablr/helpers/grammar';
 import { arrayValues } from '@bablr/agast-helpers/iterable';
-import { freeze } from '@bablr/agast-helpers/object';
+import { freeze, when } from '@bablr/agast-helpers/object';
 
 let subtleCrypto = crypto.subtle;
 let digest_ = subtleCrypto.digest;
@@ -54,22 +50,42 @@ export const printOpenNodeTag = (tag) => {
   if (literalValue && !selfClosing) throw new Error();
   let selfClosingFrag = selfClosing ? '/' : '';
   let literalFrag = literalValue ? `${printString(literalValue)}` : '';
-
+  let flagsFrag = printNodeFlags(flags);
   let printedAttributes = printAttributes(attributes);
   let attributesFrag = printedAttributes ? `${printedAttributes}` : '';
   let typeFrag = type ? printNodeType(type) : '';
   let nameFrag = name ? printType(name) : '';
 
-  return `<${printNodeFlags(
-    flags,
-  )}${typeFrag}${nameFrag}${literalFrag}${attributesFrag}${selfClosingFrag}>`;
+  return `<${flagsFrag}${typeFrag}${nameFrag}${literalFrag}${attributesFrag}${selfClosingFrag}>`;
+};
+
+export const printCloseNodeTag = (tag) => {
+  if (tag?.type !== CloseNodeTag) throw new Error();
+  let { hash } = tag.value;
+  let hashFrag = hash ? `##${hash}##` : '';
+
+  return `</>${hashFrag}`;
+};
+
+export const printGapTag = (tag) => {
+  if (tag?.type !== GapTag) throw new Error();
+  let { hash } = tag.value;
+  let hashFrag = hash ? `##${hash}##` : '';
+
+  return `<//>${hashFrag}`;
 };
 
 export const vcsPrintTag = (tag) => {
-  if (parseTagType(tag) === OpenNodeTag) {
-    return printOpenNodeTag(parseTag(tag));
-  } else {
-    return printTag(tag);
+  let tag_ = parseTag(tag);
+  switch (parseTagType(tag)) {
+    case OpenNodeTag:
+      return printOpenNodeTag(parseTag(tag));
+    case CloseNodeTag:
+      return printCloseNodeTag(parseTag(tag));
+    case GapTag:
+      return printGapTag(parseTag(tag));
+    default:
+      return printTag(tag);
   }
 };
 
@@ -137,6 +153,9 @@ function* __init(options, rootDir) {
     let file = `${rootDir}/${dirStep.value.name}`;
     let stack = [];
     let nodePath = null;
+    let finishedNode = null;
+    let finishedHash = null;
+    let shifting = false;
 
     const matcher = options.matcher
       ? m({ raw: [options.matcher] })
@@ -166,7 +185,15 @@ function* __init(options, rootDir) {
         nodePath = Path.fromTag(tag);
       }
 
-      if (tag.type === GapTag || tag.type === NullTag) {
+      if (tag.type === ShiftTag) {
+        shifting = true;
+      }
+
+      if (tag.type === GapTag && shifting) {
+        shifting = false;
+        let hashedGap = buildNode(Tags.fromValues([`##${finishedHash}##`, '<//>']));
+        nodePath = nodePath.advance(hashedGap);
+      } else if (tag.type === GapTag || tag.type === NullTag) {
         nodePath = nodePath.advance(Path.fromTag(strTag).node);
       } else if (!isOpen && !isClose) {
         nodePath = nodePath.advance(strTag);
@@ -176,61 +203,81 @@ function* __init(options, rootDir) {
         if (isClose) {
           nodePath = nodePath.advance(strTag);
         }
-        let finishedNode = nodePath.node;
+        finishedNode = nodePath.node;
 
         let intrinsic = false;
         if (stack.length) {
           nodePath = stack.pop();
 
-          let property = nodePath.getChild(-1);
+          let property = nodePath.childAt(-1);
 
           intrinsic =
             (!propertyIsFull(property) && property.value.reference?.flags.intrinsic) ||
             ['#', '@'].includes(property.value.reference?.type);
-          nodePath = nodePath.advance(intrinsic ? finishedNode : Path.fromTag('<//>').node);
-        }
 
-        if (!intrinsic) {
-          let children = Tags.getValues(Tags.getTags(finishedNode))[1] || Tags.fromValues([]);
+          let hash = null;
+          if (!intrinsic) {
+            let children = Tags.getValues(Tags.getTags(finishedNode))[2] || Tags.empty();
 
-          if (Tags.getDepth(children) === 1) {
-            let str = vcsPrintCSTML(streamFromTree(finishedNode));
-            let hash = yield wait(hashNode(str));
-            console.log(`${hash}: ${str}`);
-          } else {
-            let tree = children;
-            let newTree = Tags.fromValues([]);
-            let stack = [];
-            while (tree) {
-              let idx = Tags.getSize(newTree);
-              if (idx < Tags.getSize(tree)) {
-                stack.push({ tree, newTree });
-                tree = Tags.getValues(tree)[idx];
-                newTree = Tags.getDepth(tree) > 1 ? Tags.fromValues([]) : tree;
-              } else {
-                let _finishedTree = tree;
-                let finishedNewTree = newTree;
+            if (Tags.getDepth(children) === 1) {
+              let str = vcsPrintCSTML(streamFromTree(finishedNode));
+              hash = yield wait(hashNode(str));
+              console.log(`##${hash}##${str}`);
+              finishedHash = hash;
+            } else {
+              let tree = children;
+              let newTree = Tags.empty();
+              let stack = [];
+              while (tree) {
+                let idx = Tags.getValues(newTree).length;
+                if (idx < Tags.getValues(tree).length) {
+                  stack.push({ tree, newTree });
+                  tree = Tags.getValues(tree)[idx];
+                  newTree = Tags.getDepth(tree) > 1 ? Tags.empty() : tree;
+                } else {
+                  let _finishedTree = tree;
+                  let finishedNewTree = newTree;
 
-                let frame = stack.pop();
-                tree = frame.tree;
-                newTree = frame.newTree;
+                  let frame = stack.pop();
 
-                let str = vcsPrintCSTML(
-                  streamFromTree(buildNode(Tags.from('<__>', finishedNewTree, '</>'))),
-                );
-                let hash = yield wait(hashNode(str));
-                console.log(`${hash}: ${str}`);
+                  let startsWithShift = Tags.getAt(0, finishedNewTree).value.shift;
 
-                let tags_ = BList.fromValues(
-                  ['__:', Tags.fromValues([]), Path.fromTag('<//>').node, buildHashTag(hash)],
-                  1,
-                );
-                let newProperty = buildPropertyTag(tags_);
+                  let node = buildNode(
+                    Tags.fromValues([Tags.empty(), '<__>', finishedNewTree, '</>'], 1),
+                  );
+                  let str = vcsPrintCSTML(streamFromTree(node));
+                  if (startsWithShift) {
+                    str = `<__>##${finishedHash}##${str.slice(4)}`;
+                  }
+                  hash = yield wait(hashNode(str));
+                  finishedHash = hash;
+                  console.log(`##${hash}##${str}`);
 
-                newTree = Tags.push(newProperty, newTree);
+                  if (!frame) {
+                    break;
+                  }
+
+                  tree = frame.tree;
+                  newTree = frame.newTree;
+
+                  let hashedGap = buildNode(Tags.fromValues([`##${hash}##`, '<//>']));
+
+                  let tags_ = BList.fromValues(['__:', Tags.empty(), hashedGap], 1);
+                  let newProperty = buildPropertyTag(tags_);
+
+                  newTree = Tags.push(newProperty, newTree);
+                }
               }
             }
           }
+
+          nodePath = nodePath.advance(
+            intrinsic ? finishedNode : buildNode(Tags.fromValues([`##${hash}##`, '<//>'])),
+          );
+        } else {
+          let str = vcsPrintCSTML(streamFromTree(finishedNode));
+          let hash = yield wait(hashNode(str));
+          console.log(`##${hash}##${str}`);
         }
       }
     }
