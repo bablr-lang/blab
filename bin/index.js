@@ -262,7 +262,7 @@ function* __init(options, rootDir) {
 
                   let hashedGap = buildNode(Tags.fromValues([`##${hash}##`, '<//>']));
 
-                  let tags_ = BList.fromValues(['__:', Tags.empty(), hashedGap], 1);
+                  let tags_ = BList.fromValues(['__:', BList.empty(), hashedGap], 1);
                   let newProperty = buildPropertyTag(tags_);
 
                   newTree = Tags.push(newProperty, newTree);
