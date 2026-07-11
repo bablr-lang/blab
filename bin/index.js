@@ -13,119 +13,17 @@ import {
   continue_,
   getStreamIterator,
   streamFromTree,
-  prettyGroupTags,
-  stringFromStream,
+  printCSTML,
 } from '@bablr/agast-helpers/stream';
-import {
-  printAttributes,
-  printNodeFlags,
-  printNodeType,
-  printString,
-  printTag,
-  printType,
-} from '@bablr/agast-helpers/print';
-import { buildPropertyTag, parseTag, parseTagType } from '@bablr/agast-helpers/builders';
-import {
-  CloseNodeTag,
-  GapTag,
-  NullTag,
-  OpenNodeTag,
-  ReferenceTag,
-  ShiftTag,
-} from '@bablr/agast-helpers/symbols';
+
+import { buildPropertyTag, parseTag } from '@bablr/agast-helpers/builders';
+import { CloseNodeTag, GapTag, NullTag, OpenNodeTag, ShiftTag } from '@bablr/agast-helpers/symbols';
 import { buildNode, Path, propertyIsFull } from '@bablr/agast-helpers/path';
 import { m } from '@bablr/helpers/grammar';
-import { arrayValues } from '@bablr/agast-helpers/iterable';
-import { freeze, when } from '@bablr/agast-helpers/object';
 
 let subtleCrypto = crypto.subtle;
 let digest_ = subtleCrypto.digest;
 let digest = (str) => digest_.call(subtleCrypto, 'SHA-512', Buffer.from(str));
-
-export const printOpenNodeTag = (tag) => {
-  if (tag?.type !== OpenNodeTag) throw new Error();
-
-  let { flags, type, name, literalValue, attributes, selfClosing } = tag.value;
-
-  if (literalValue && !selfClosing) throw new Error();
-  let selfClosingFrag = selfClosing ? '/' : '';
-  let literalFrag = literalValue ? `${printString(literalValue)}` : '';
-  let flagsFrag = printNodeFlags(flags);
-  let printedAttributes = printAttributes(attributes);
-  let attributesFrag = printedAttributes ? `${printedAttributes}` : '';
-  let typeFrag = type ? printNodeType(type) : '';
-  let nameFrag = name ? printType(name) : '';
-
-  return `<${flagsFrag}${typeFrag}${nameFrag}${literalFrag}${attributesFrag}${selfClosingFrag}>`;
-};
-
-export const printCloseNodeTag = (tag) => {
-  if (tag?.type !== CloseNodeTag) throw new Error();
-  let { hash } = tag.value;
-  let hashFrag = hash ? `##${hash}##` : '';
-
-  return `</>${hashFrag}`;
-};
-
-export const printGapTag = (tag) => {
-  if (tag?.type !== GapTag) throw new Error();
-  let { hash } = tag.value;
-  let hashFrag = hash ? `##${hash}##` : '';
-
-  return `<//>${hashFrag}`;
-};
-
-export const vcsPrintTag = (tag) => {
-  let tag_ = parseTag(tag);
-  switch (parseTagType(tag)) {
-    case OpenNodeTag:
-      return printOpenNodeTag(parseTag(tag));
-    case CloseNodeTag:
-      return printCloseNodeTag(parseTag(tag));
-    case GapTag:
-      return printGapTag(parseTag(tag));
-    default:
-      return printTag(tag);
-  }
-};
-
-function* __generateCSTML(tags, options) {
-  if (!tags) {
-    yield* 'null';
-    return;
-  }
-
-  let prevTagType = null;
-  let iter = getStreamIterator(prettyGroupTags(tags));
-  let step;
-
-  for (;;) {
-    step = iter.next();
-    while (step === null || step instanceof Promise) {
-      if (step === null) yield continue_(), (step = iter.next());
-      if (step instanceof Promise) step = yield wait(step);
-    }
-    if (step.done) break;
-
-    const tag = step.value;
-    let tagType = parseTagType(tag);
-
-    if (tagType === ReferenceTag && prevTagType === NullTag) {
-      yield* ' ';
-    }
-
-    yield* vcsPrintTag(tag);
-
-    prevTagType = tagType;
-  }
-}
-
-export const generateCSTML = (tags, options = freeze({})) =>
-  new StreamIterable(__generateCSTML(tags, options));
-
-export const vcsPrintCSTML = (tags) => {
-  return stringFromStream(generateCSTML(tags));
-};
 
 // TODO move this somewhere else
 let hashNode = async (str) => {
@@ -220,7 +118,7 @@ function* __init(options, rootDir) {
             let children = Tags.getValues(Tags.getTags(finishedNode))[2] || Tags.empty();
 
             if (Tags.getDepth(children) === 1) {
-              let str = vcsPrintCSTML(streamFromTree(finishedNode));
+              let str = printCSTML(streamFromTree(finishedNode), { porcelain: true });
               hash = yield wait(hashNode(str));
               console.log(`##${hash}##${str}`);
               finishedHash = hash;
