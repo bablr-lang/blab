@@ -14,12 +14,14 @@ import {
   getStreamIterator,
   streamFromTree,
   printCSTML,
+  hoist,
 } from '@bablr/agast-helpers/stream';
 
 import { buildPropertyTag, parseTag } from '@bablr/agast-helpers/builders';
 import { CloseNodeTag, GapTag, NullTag, OpenNodeTag, ShiftTag } from '@bablr/agast-helpers/symbols';
 import { buildNode, Path, propertyIsFull } from '@bablr/agast-helpers/path';
-import { m } from '@bablr/helpers/grammar';
+import { m, o } from '@bablr/helpers/grammar';
+import { freeze } from '@bablr/agast-helpers/object';
 
 let subtleCrypto = crypto.subtle;
 let digest_ = subtleCrypto.digest;
@@ -32,6 +34,12 @@ let hashNode = async (str) => {
   return btoa(
     Array.from(new Uint8Array(hash), (byte) => String.fromCodePoint(byte)).join(''),
   ).slice(0, 4);
+};
+
+let vcsPrint = (tree) => {
+  return printCSTML(streamFromTree(tree, { unshift: true }), {
+    porcelain: true,
+  });
 };
 
 function* __init(options, rootDir) {
@@ -61,7 +69,17 @@ function* __init(options, rootDir) {
       ? m`<${options.production} />`
       : language.defaultMatcher;
 
-    let streamIter = getStreamIterator(streamParse(language, matcher, decodeUTF8(readFile(file))));
+    let streamIter = getStreamIterator(
+      hoist(
+        streamParse(
+          language,
+          matcher,
+          decodeUTF8(readFile(file)),
+          o({}),
+          freeze({ holdShiftedNodes: true }),
+        ),
+      ),
+    );
     let streamStep;
     for (;;) {
       streamStep = streamIter.next();
@@ -89,8 +107,8 @@ function* __init(options, rootDir) {
 
       if (tag.type === GapTag && shifting) {
         shifting = false;
-        let hashedGap = buildNode(Tags.fromValues([`##${finishedHash}##`, '<//>']));
-        nodePath = nodePath.advance(hashedGap);
+        nodePath = nodePath.advance(`##${finishedHash}##`);
+        nodePath = nodePath.advance(`<//>`);
       } else if (tag.type === GapTag || tag.type === NullTag) {
         nodePath = nodePath.advance(Path.fromTag(strTag).node);
       } else if (!isOpen && !isClose) {
@@ -118,7 +136,7 @@ function* __init(options, rootDir) {
             let children = Tags.getValues(Tags.getTags(finishedNode))[2] || Tags.empty();
 
             if (Tags.getDepth(children) === 1) {
-              let str = printCSTML(streamFromTree(finishedNode), { porcelain: true });
+              let str = vcsPrint(finishedNode);
               hash = yield wait(hashNode(str));
               console.log(`##${hash}##${str}`);
               finishedHash = hash;
@@ -140,10 +158,8 @@ function* __init(options, rootDir) {
 
                   let startsWithShift = Tags.getAt(0, finishedNewTree).value.shift;
 
-                  let node = buildNode(
-                    Tags.fromValues([Tags.empty(), '<__>', finishedNewTree, '</>'], 1),
-                  );
-                  let str = vcsPrintCSTML(streamFromTree(node));
+                  let node = buildNode(Tags.fromValues(['<__>', finishedNewTree, '</>'], 1));
+                  let str = vcsPrint(node);
                   if (startsWithShift) {
                     str = `<__>##${finishedHash}##${str.slice(4)}`;
                   }
@@ -158,9 +174,9 @@ function* __init(options, rootDir) {
                   tree = frame.tree;
                   newTree = frame.newTree;
 
-                  let hashedGap = buildNode(Tags.fromValues([`##${hash}##`, '<//>']));
+                  let gapNode = buildNode(Tags.fromValues(['<//>']));
 
-                  let tags_ = BList.fromValues(['__:', BList.empty(), hashedGap], 1);
+                  let tags_ = BList.fromValues(['__:', BList.empty(), `##${hash}##`, gapNode], 1);
                   let newProperty = buildPropertyTag(tags_);
 
                   newTree = Tags.push(newProperty, newTree);
@@ -169,11 +185,14 @@ function* __init(options, rootDir) {
             }
           }
 
-          nodePath = nodePath.advance(
-            intrinsic ? finishedNode : buildNode(Tags.fromValues([`##${hash}##`, '<//>'])),
-          );
+          if (intrinsic) {
+            nodePath = nodePath.advance(finishedNode);
+          } else {
+            nodePath = nodePath.advance(`##${hash}##`);
+            nodePath = nodePath.advance('<//>');
+          }
         } else {
-          let str = vcsPrintCSTML(streamFromTree(finishedNode));
+          let str = vcsPrint(finishedNode);
           let hash = yield wait(hashNode(str));
           console.log(`##${hash}##${str}`);
         }
