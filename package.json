@@ -12,7 +12,8 @@
     "blab": "bin/index.js"
   },
   "exports": {
-    ".": "./bin/index.js"
+    ".": "./bin/index.js",
+    "./commands/init": "./commands/init.js"
   },
   "sideEffects": false,
   "dependencies": {
