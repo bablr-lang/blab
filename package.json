@@ -19,6 +19,7 @@
   "dependencies": {
     "@bablr/agast-helpers": "0.11.4",
     "@bablr/fs": "4.0.0",
+    "@bablr/fs-cstml": "1.0.0",
     "@bablr/helpers": "0.26.5",
     "@bablr/record": "1.0.0",
     "bablr": "0.12.6",
