@@ -238,36 +238,49 @@ function* __repoify(options, rootDir) {
 
               if (treeStack.length) {
                 ({ tree, newTree, idx } = treeStack.pop());
+
+                let gapNode = buildNode(Tags.fromValues(['<//>']));
+
+                let tags_ = BList.fromValues(['__:', '', `##${hash}##`, gapNode], 1);
+                let newProperty = buildPropertyTag(tags_);
+
+                newTree = Tags.push(newProperty, newTree);
+
+                continue;
               } else {
                 break;
               }
+            }
+
+            if (Tags.getDepth(tree) > 1 && idx < Tags.getValues(tree).length) {
+              treeStack.push({ tree, newTree, idx: idx + 1 });
+              tree = Tags.getValues(tree)[idx];
+              newTree = Tags.empty();
+              idx = 0;
             } else {
-              if (idx < Tags.getValues(tree).length) {
-                treeStack.push({ tree, newTree, idx: idx + 1 });
-                tree = Tags.getValues(tree)[idx];
-                newTree = Tags.getDepth(tree) > 1 ? Tags.empty() : tree;
-                idx = 0;
-              } else {
-                let _finishedTree = tree;
-                let finishedNewTree = newTree;
+              let _finishedTree = tree;
+              let finishedNewTree = newTree;
 
-                let frame = treeStack.pop();
+              let frame = treeStack.pop();
 
-                let startsWithShift = Tags.getAt(0, finishedNewTree)?.value.shift;
+              let startsWithShift = Tags.getAt(0, finishedNewTree)?.value.shift;
 
-                let node = buildNode(Tags.fromValues(['<__>', finishedNewTree, '</>'], 1));
-                let str = vcsPrint(node);
-                if (startsWithShift) {
-                  str = `##${finishedHash}##${str.slice(4)} <__>`;
-                }
-                hash = yield wait(hashNode(str));
-                finishedHash = hash;
-                // console.log(`##${hash}##${str}`);
+              let node = buildNode(
+                Tags.fromValues(
+                  [treeStack.length ? '<__>' : getOpenTag(finishedNode), finishedNewTree, '</>'],
+                  1,
+                ),
+              );
+              let str = vcsPrint(node);
+              if (startsWithShift) {
+                throw new Error('check me');
+                str = `##${finishedHash}##${str} <__>`;
+              }
+              hash = yield wait(hashNode(str));
+              finishedHash = hash;
+              // console.log(`##${hash}##${str}`);
 
-                if (!frame) {
-                  break;
-                }
-
+              if (frame) {
                 ({ tree, newTree, idx } = frame);
 
                 let gapNode = buildNode(Tags.fromValues(['<//>']));
@@ -276,6 +289,8 @@ function* __repoify(options, rootDir) {
                 let newProperty = buildPropertyTag(tags_);
 
                 newTree = Tags.push(newProperty, newTree);
+              } else {
+                break;
               }
             }
           }
@@ -286,11 +301,13 @@ function* __repoify(options, rootDir) {
             finishedHash = yield wait(hashNode(str));
 
             yield `##${finishedHash}##`;
-            yield getOpenTag(finishedNode);
-            yield '__:';
-            yield `##${childrenHash}##`;
-            yield '<//>';
-            yield '</>';
+            let node = buildNode(
+              Tags.fromValues(
+                [treeStack.length ? '<__>' : getOpenTag(finishedNode), newTree, '</>'],
+                1,
+              ),
+            );
+            yield* streamFromTree(node);
           }
         }
 
