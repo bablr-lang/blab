@@ -117,7 +117,7 @@ function* __walkTree(rootDir, options) {
       let matcher = options.matcher
         ? m({ raw: [options.matcher] })
         : options.production
-        ? m`<${options.production} />`
+        ? m`<{options.production} />`
         : language.defaultMatcher;
 
       let streamIter = getStreamIterator(
