@@ -37,7 +37,7 @@ import {
 import { m, o } from '@bablr/helpers/grammar';
 import { arrayLast, freeze, isObject } from '@bablr/agast-helpers/object';
 import { buildReferenceTag } from '@bablr/agast-helpers/builders';
-import { printSums, printTag } from '@bablr/agast-helpers/print';
+import { printBinding, printSums, printTag } from '@bablr/agast-helpers/print';
 
 let subtleCrypto = crypto.subtle;
 let digest_ = subtleCrypto.digest;
@@ -277,7 +277,10 @@ function* __repoify(options, rootDir) {
 
               let gapNode = buildNode(Tags.fromValues(['<//>']));
 
-              let tags_ = BList.fromValues(['__:', '', `##${hash}##`, gapNode], 1);
+              let tags_ = BList.fromValues(
+                ['__:', property?.value.tags[1]?.[1] || '', `##${hash}##`, gapNode],
+                1,
+              );
               let newProperty = buildPropertyTag(tags_);
 
               newTree = Tags.push(newProperty, newTree);
