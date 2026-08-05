@@ -192,7 +192,7 @@ function* __repoify(options, rootDir) {
   let finishedHash = null;
   let shifting = false;
 
-  yield '<__>';
+  yield '<[__]>';
 
   for (;;) {
     let step = iter.next();
@@ -248,10 +248,10 @@ function* __repoify(options, rootDir) {
 
       let hash = null;
       if (!intrinsic) {
-        let children = Tags.getValues(Tags.getTags(finishedNode))[1] || Tags.empty();
+        let children = Tags.getValues(Tags.getTags(finishedNode))[1] || Tags.create();
 
         let tree = children;
-        let newTree = Tags.empty();
+        let newTree = Tags.create();
         let idx = 0;
         let treeStack = [];
         while (tree) {
@@ -294,7 +294,7 @@ function* __repoify(options, rootDir) {
           if (Tags.getDepth(tree) > 1 && idx < Tags.getValues(tree).length) {
             treeStack.push({ tree, newTree, idx: idx + 1 });
             tree = Tags.getValues(tree)[idx];
-            newTree = Tags.empty();
+            newTree = Tags.create();
             idx = 0;
           } else {
             let _finishedTree = tree;
