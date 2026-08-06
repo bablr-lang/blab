@@ -37,7 +37,7 @@ import {
 import { m, o } from '@bablr/helpers/grammar';
 import { arrayLast, freeze, isObject } from '@bablr/agast-helpers/object';
 import { buildReferenceTag } from '@bablr/agast-helpers/builders';
-import { printBinding, printSums, printTag } from '@bablr/agast-helpers/print';
+import { printSums, printTag } from '@bablr/agast-helpers/print';
 
 let subtleCrypto = crypto.subtle;
 let digest_ = subtleCrypto.digest;
@@ -117,7 +117,7 @@ function* __walkTree(rootDir, options) {
       let matcher = options.matcher
         ? m({ raw: [options.matcher] })
         : options.production
-        ? m`<{options.production} />`
+        ? m`<${options.production} />`
         : language.defaultMatcher;
 
       let streamIter = getStreamIterator(
@@ -317,7 +317,7 @@ function* __repoify(options, rootDir) {
           let sums = [...arrayValues(Tags.getSums(tree))];
           sums[4] = gaps;
           yield printSums(Tags.getSums(node.value.children));
-          yield* streamFromTree(node);
+          yield* streamFromTree(node, freezeRecord({ sums: true }));
         }
       }
 
