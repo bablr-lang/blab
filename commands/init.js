@@ -54,7 +54,7 @@ let hashNode = async (str) => {
 
 let vcsPrint = (tree) => {
   return printCSTML(
-    streamFromTree(tree, freezeRecord({ unshift: true })),
+    streamFromTree(tree, freezeRecord({ unshift: true, sums: true })),
     freezeRecord({ porcelain: true }),
   );
 };
@@ -144,37 +144,6 @@ function* __walkTree(rootDir, options) {
 
       yield '</>';
     }
-  }
-}
-
-const withSums = (sumTag, tags) => {
-  return new StreamIterable(__withSums(sumTag, tags));
-};
-
-function* __withSums(sums, tags) {
-  let iter = getStreamIterator(tags);
-  let depth = 0;
-
-  for (;;) {
-    let step = iter.next();
-    while (step === null || step instanceof Promise) {
-      if (step === null) yield continue_(), (step = iter.next());
-      if (step instanceof Promise) step = yield wait(step);
-    }
-    if (step.done) break;
-
-    let tag_ = step.value;
-    let tag = parseTag(tag_);
-
-    if (tag.type === OpenNodeTag && !tag.value.selfClosing) {
-      ++depth;
-    } else if (tag.type === CloseNodeTag) {
-      --depth;
-      if (depth === 0) {
-        yield printSums(sums, { porcelain: true });
-      }
-    }
-    yield tag_;
   }
 }
 
@@ -269,18 +238,16 @@ function* __repoify(options, rootDir) {
             finishedHash = hash;
             yield `##${hash}##`;
             let sums = [...arrayValues(Tags.getSums(tree))];
-            sums[3] = gaps;
-            yield* withSums(sums, streamFromTree(node));
+            sums[4] = gaps;
+            yield printSums(Tags.getSums(node.value.children));
+            yield* streamFromTree(node);
 
             if (treeStack.length) {
               ({ tree, newTree, idx } = treeStack.pop());
 
               let gapNode = buildNode(Tags.fromValues(['<//>']));
 
-              let tags_ = BList.fromValues(
-                ['__:', property?.value.tags[1]?.[1] || '', `##${hash}##`, gapNode],
-                1,
-              );
+              let tags_ = BList.fromValues(['__:', '', `##${hash}##`, printSums(sums), gapNode], 1);
               let newProperty = buildPropertyTag(tags_);
 
               newTree = Tags.push(newProperty, newTree);
@@ -324,7 +291,7 @@ function* __repoify(options, rootDir) {
 
               let gapNode = buildNode(Tags.fromValues(['<//>']));
 
-              let tags_ = BList.fromValues(['__:', '', `##${hash}##`, gapNode], 1);
+              let tags_ = BList.fromValues(['__:', '', `##${hash}##`, '', gapNode], 1);
               let newProperty = buildPropertyTag(tags_);
 
               newTree = Tags.push(newProperty, newTree);
@@ -348,8 +315,9 @@ function* __repoify(options, rootDir) {
           );
 
           let sums = [...arrayValues(Tags.getSums(tree))];
-          sums[3] = gaps;
-          yield* withSums(sums, streamFromTree(node));
+          sums[4] = gaps;
+          yield printSums(Tags.getSums(node.value.children));
+          yield* streamFromTree(node);
         }
       }
 
