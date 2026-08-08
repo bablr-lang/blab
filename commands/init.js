@@ -239,7 +239,7 @@ function* __repoify(options, rootDir) {
             yield `##${hash}##`;
             let sums = [...arrayValues(Tags.getSums(tree))];
             sums[4] = gaps;
-            yield printSums(Tags.getSums(node.value.children));
+
             yield* streamFromTree(node);
 
             if (treeStack.length) {
@@ -316,7 +316,7 @@ function* __repoify(options, rootDir) {
 
           let sums = [...arrayValues(Tags.getSums(tree))];
           sums[4] = gaps;
-          yield printSums(Tags.getSums(node.value.children));
+
           yield* streamFromTree(node, freezeRecord({ sums: true }));
         }
       }
