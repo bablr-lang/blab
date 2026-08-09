@@ -30,6 +30,7 @@ import {
 import {
   buildNode,
   buildPropertyTag,
+  flagsForSigilTag,
   getOpenTag,
   Path,
   propertyIsFull,
@@ -179,7 +180,7 @@ function* __repoify(options, rootDir) {
 
     if (isOpen) {
       if (nodePath) stack.push({ nodePath, gaps });
-      nodePath = Path.fromTag(tag);
+      nodePath = Path.fromTag(strTag);
     }
 
     if (tag.type === ShiftTag) {
@@ -225,11 +226,13 @@ function* __repoify(options, rootDir) {
         let treeStack = [];
         while (tree) {
           if (Tags.getDepth(tree) === 1) {
+            let sigilTag = treeStack.length
+              ? finishedNode.value.flags.object
+                ? '<{__}>'
+                : '<__>'
+              : getOpenTag(finishedNode);
             let node = buildNode(
-              Tags.fromValues(
-                [treeStack.length ? '<__>' : getOpenTag(finishedNode), tree, '</>'],
-                1,
-              ),
+              Tags.fromValues([sigilTag, tree, '</>'], flagsForSigilTag(sigilTag), 1),
             );
             let str = vcsPrint(node);
             hash = yield wait(hashNode(str));
@@ -237,8 +240,9 @@ function* __repoify(options, rootDir) {
 
             finishedHash = hash;
             yield `##${hash}##`;
-            let sums = [...arrayValues(Tags.getSums(tree))];
-            sums[4] = gaps;
+            let sums = [...arrayValues(Tags.sumValues(tree[1]))];
+            sums[3] = gaps; // still needed?
+            yield printSums(Tags.getSums(node.value.children));
 
             yield* streamFromTree(node);
 
@@ -271,11 +275,13 @@ function* __repoify(options, rootDir) {
 
             let startsWithShift = Tags.getAt(0, finishedNewTree)?.value.shift;
 
+            let sigilTag = treeStack.length
+              ? finishedNode.value.flags.object
+                ? '<{__}>'
+                : '<__>'
+              : getOpenTag(finishedNode);
             let node = buildNode(
-              Tags.fromValues(
-                [treeStack.length ? '<__>' : getOpenTag(finishedNode), finishedNewTree, '</>'],
-                1,
-              ),
+              Tags.fromValues([sigilTag, finishedNewTree, '</>'], flagsForSigilTag(sigilTag), 1),
             );
             let str = vcsPrint(node);
             if (startsWithShift) {
@@ -309,13 +315,23 @@ function* __repoify(options, rootDir) {
           yield `##${finishedHash}##`;
           let node = buildNode(
             Tags.fromValues(
-              [treeStack.length ? '<__>' : getOpenTag(finishedNode), newTree, '</>'],
+              [
+                treeStack.length
+                  ? finishedNode.value.flags.object
+                    ? '<{__}>'
+                    : '<__>'
+                  : getOpenTag(finishedNode),
+                newTree,
+                '</>',
+              ],
+              '',
               1,
             ),
           );
 
           let sums = [...arrayValues(Tags.getSums(tree))];
-          sums[4] = gaps;
+          sums[3] = gaps;
+          yield printSums(Tags.getSums(node.value.children));
 
           yield* streamFromTree(node, freezeRecord({ sums: true }));
         }
