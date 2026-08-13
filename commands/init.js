@@ -20,6 +20,7 @@ import { streamFromTree, printCSTML, hoist, treeFromStream } from '@bablr/agast-
 
 import { parseTag } from '@bablr/agast-helpers/parsers';
 import {
+  BindingTag,
   CloseNodeTag,
   GapTag,
   NullTag,
@@ -30,6 +31,7 @@ import {
 import {
   buildNode,
   buildPropertyTag,
+  buildSumsForNode,
   flagsForSigilTag,
   getOpenTag,
   Path,
@@ -38,7 +40,8 @@ import {
 import { m, o } from '@bablr/helpers/grammar';
 import { arrayLast, freeze, isObject } from '@bablr/agast-helpers/object';
 import { buildReferenceTag } from '@bablr/agast-helpers/builders';
-import { printSums, printTag } from '@bablr/agast-helpers/print';
+import { printObject, printSums, printTag } from '@bablr/agast-helpers/print';
+import { finished } from 'node:stream';
 
 let subtleCrypto = crypto.subtle;
 let digest_ = subtleCrypto.digest;
@@ -72,6 +75,8 @@ function* __walkTree(rootDir, options) {
   let name;
   let path = [];
   let names = [];
+  let ref = null;
+  let fileBinding = false;
   for (;;) {
     dirStep = dirIter.next();
     while (dirStep === null || dirStep instanceof Promise) {
@@ -84,66 +89,79 @@ function* __walkTree(rootDir, options) {
     let tag_ = dirStep.value;
     let tag = parseTag(tag_);
 
-    if (tag.type !== GapTag) {
-      if (tag.type === ReferenceTag) {
-        if (tag.value.name) {
-          ({ name } = tag.value);
+    if (tag.type === ReferenceTag) {
+      ref = tag;
+      if (tag.value.name) {
+        ({ name } = tag.value);
 
-          yield tag_;
-        }
-      } else if (tag.type === OpenNodeTag) {
-        path.push(tag);
-
-        if (name && tag.value.name === Symbol.for('Dir')) {
-          names.push(name);
-        }
-        if (!tag.value.type) {
-          yield tag_;
-        }
-      } else if (tag.type === CloseNodeTag) {
-        let open = path.pop();
-        if (open.value.name === Symbol.for('Dir')) {
-          names.pop();
-        }
-        if (!open.value.type) {
-          yield tag_;
-        }
-      } else {
         yield tag_;
       }
-    } else {
-      yield '<File>';
-      yield 'content:';
+    } else if (tag.type === OpenNodeTag) {
+      path.push(tag);
 
-      let matcher = options.matcher
-        ? m({ raw: [options.matcher] })
-        : options.production
-        ? m`<${options.production} />`
-        : language.defaultMatcher;
+      if (name && tag.value.name === Symbol.for('Dir')) {
+        names.push(name);
+      }
+      if (!tag.value.type) {
+        yield tag_;
+      }
+    } else if (tag.type === CloseNodeTag) {
+      let open = path.pop();
+      if (open.value.name === Symbol.for('Dir')) {
+        names.pop();
+      }
+      if (!open.value.type) {
+        yield tag_;
+      }
+    } else if (tag.type === BindingTag) {
+      if (tag.value.name === Symbol.for('File')) {
+        fileBinding = true;
+      } else {
+        throw new Error();
+      }
+    } else if (tag.type === GapTag) {
+      if (fileBinding) {
+        yield ':File:';
+        yield `<File ${printObject({ schema: language.canonicalURL })}>`;
+        yield 'content:';
 
-      let streamIter = getStreamIterator(
-        hoist(
-          streamParse(
-            language,
-            matcher,
-            decodeUTF8(readFile(`${rootDir}/${names.join('/')}/${name}`)),
+        let matcher = options.matcher
+          ? m({ raw: [options.matcher] })
+          : options.production
+          ? m`<${options.production} />`
+          : language.defaultMatcher;
+
+        let streamIter = getStreamIterator(
+          hoist(
+            streamParse(
+              language,
+              matcher,
+              decodeUTF8(readFile(`${rootDir}/${names.join('/')}/${name}`)),
+            ),
           ),
-        ),
-      );
-      let streamStep;
-      for (;;) {
-        streamStep = streamIter.next();
-        while (streamStep === null || streamStep instanceof Promise) {
-          if (streamStep === null) yield continue_(), (streamStep = streamIter.next());
-          if (streamStep instanceof Promise) streamStep = yield wait(streamStep);
+        );
+
+        let streamStep;
+        for (;;) {
+          streamStep = streamIter.next();
+          while (streamStep === null || streamStep instanceof Promise) {
+            if (streamStep === null) yield continue_(), (streamStep = streamIter.next());
+            if (streamStep instanceof Promise) streamStep = yield wait(streamStep);
+          }
+
+          if (streamStep.done) break;
+
+          yield streamStep.value;
         }
 
-        if (streamStep.done) break;
-
-        yield streamStep.value;
+        yield '</>';
+      } else {
+        yield* __walkTree(`${rootDir}/${ref.value.name}`, options);
       }
 
-      yield '</>';
+      fileBinding = false;
+    } else {
+      yield tag_;
     }
   }
 }
@@ -221,67 +239,40 @@ function* __repoify(options, rootDir) {
         let children = Tags.getValues(Tags.getTags(finishedNode))[1] || Tags.create();
 
         let tree = children;
-        let newTree = Tags.create();
+        let newTree = Tags.create(Tags.getFlags(children));
         let idx = 0;
         let treeStack = [];
+
         while (tree) {
-          if (Tags.getDepth(tree) === 1) {
-            let sigilTag = treeStack.length
-              ? finishedNode.value.flags.object
-                ? '<{__}>'
-                : '<__>'
-              : getOpenTag(finishedNode);
-            let node = buildNode(
-              Tags.fromValues([sigilTag, tree, '</>'], flagsForSigilTag(sigilTag), 1),
-            );
-            let str = vcsPrint(node);
-            hash = yield wait(hashNode(str));
-            // console.log(`##${hash}##${str}`);
-
-            finishedHash = hash;
-            yield `##${hash}##`;
-            let sums = [...arrayValues(Tags.sumValues(tree[1]))];
-            sums[3] = gaps; // still needed?
-            yield printSums(Tags.getSums(node.value.children));
-
-            yield* streamFromTree(node);
-
-            if (treeStack.length) {
-              ({ tree, newTree, idx } = treeStack.pop());
-
-              let gapNode = buildNode(Tags.fromValues(['<//>']));
-
-              let tags_ = BList.fromValues(['__:', '', `##${hash}##`, printSums(sums), gapNode], 1);
-              let newProperty = buildPropertyTag(tags_);
-
-              newTree = Tags.push(newProperty, newTree);
-
-              continue;
-            } else {
-              break;
-            }
-          }
-
           if (Tags.getDepth(tree) > 1 && idx < Tags.getValues(tree).length) {
             treeStack.push({ tree, newTree, idx: idx + 1 });
             tree = Tags.getValues(tree)[idx];
-            newTree = Tags.create();
+            newTree = Tags.create(Tags.getFlags(tree));
             idx = 0;
           } else {
             let _finishedTree = tree;
-            let finishedNewTree = newTree;
+            let finishedNewTree = Tags.getDepth(tree) === 1 ? tree : newTree;
 
-            let frame = treeStack.pop();
+            let frame = Tags.getDepth(tree) ? treeStack.pop() : null;
 
-            let startsWithShift = Tags.getAt(0, finishedNewTree)?.value.shift;
+            let startsWithShift = !finishedNode.value.flags.token
+              ? Tags.getAt(0, finishedNewTree)?.value.shift
+              : false;
 
-            let sigilTag = treeStack.length
-              ? finishedNode.value.flags.object
-                ? '<{__}>'
-                : '<__>'
-              : getOpenTag(finishedNode);
+            let sigilTag =
+              Tags.getDepth(tree) < Tags.getDepth(children)
+                ? finishedNode.value.flags.object
+                  ? '<{__}>'
+                  : '<__>'
+                : getOpenTag(finishedNode);
             let node = buildNode(
-              Tags.fromValues([sigilTag, finishedNewTree, '</>'], flagsForSigilTag(sigilTag), 1),
+              Tags.fromValues(
+                parseTag(sigilTag).value.selfClosing
+                  ? [sigilTag]
+                  : [sigilTag, finishedNewTree, '</>'],
+                flagsForSigilTag(sigilTag),
+                1,
+              ),
             );
             let str = vcsPrint(node);
             if (startsWithShift) {
@@ -289,15 +280,19 @@ function* __repoify(options, rootDir) {
               str = `##${finishedHash}##${str} <__>`;
             }
             hash = yield wait(hashNode(str));
+            yield `##${hash}##`;
+            yield* streamFromTree(node, freezeRecord({ sums: true }));
             finishedHash = hash;
-            // console.log(`##${hash}##${str}`);
 
             if (frame) {
               ({ tree, newTree, idx } = frame);
 
               let gapNode = buildNode(Tags.fromValues(['<//>']));
 
-              let tags_ = BList.fromValues(['__:', '', `##${hash}##`, '', gapNode], 1);
+              let tags_ = BList.fromValues(
+                ['__:', '', `##${hash}##`, printSums(Tags.buildSums(_finishedTree)), gapNode],
+                1,
+              );
               let newProperty = buildPropertyTag(tags_);
 
               newTree = Tags.push(newProperty, newTree);
@@ -305,35 +300,6 @@ function* __repoify(options, rootDir) {
               break;
             }
           }
-        }
-
-        if (Tags.getDepth(tree) > 1) {
-          let childrenHash = finishedHash;
-          let str = `${getOpenTag(finishedNode)}__:##${childrenHash}##<//></>`;
-          finishedHash = yield wait(hashNode(str));
-
-          yield `##${finishedHash}##`;
-          let node = buildNode(
-            Tags.fromValues(
-              [
-                treeStack.length
-                  ? finishedNode.value.flags.object
-                    ? '<{__}>'
-                    : '<__>'
-                  : getOpenTag(finishedNode),
-                newTree,
-                '</>',
-              ],
-              '',
-              1,
-            ),
-          );
-
-          let sums = [...arrayValues(Tags.getSums(tree))];
-          sums[3] = gaps;
-          yield printSums(Tags.getSums(node.value.children));
-
-          yield* streamFromTree(node, freezeRecord({ sums: true }));
         }
       }
 
@@ -347,6 +313,7 @@ function* __repoify(options, rootDir) {
         let hashTag = `##${finishedHash}##`;
         // yield hashTag;
         nodePath = nodePath.advance(hashTag);
+        nodePath = nodePath.advance(buildSumsForNode(finishedNode));
         // yield '<//>';
         nodePath = nodePath.advance('<//>');
       }
@@ -357,6 +324,7 @@ function* __repoify(options, rootDir) {
 }
 
 export const init = async (options, rootDir = '.') => {
+  // eslint-disable-next-line
   console.log(
     await printCSTML(repoify(options, rootDir), freezeRecord({ hoist: false, group: true })),
   );
