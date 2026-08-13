@@ -122,7 +122,7 @@ function* __walkTree(rootDir, options) {
     } else if (tag.type === GapTag) {
       if (fileBinding) {
         yield ':File:';
-        yield `<File ${printObject({ schema: language.canonicalURL })}>`;
+        yield `<{File} ${printObject({ schema: language.canonicalURL })}>`;
         yield 'content:';
 
         let matcher = options.matcher
