@@ -29,8 +29,6 @@ import {
   ShiftTag,
 } from '@bablr/agast-helpers/symbols';
 import {
-  buildNode,
-  buildPropertyTag,
   buildSumsForNode,
   flagsForSigilTag,
   getOpenTag,
