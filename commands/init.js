@@ -18,7 +18,6 @@ import {
 
 import { streamFromTree, printCSTML, hoist, treeFromStream } from '@bablr/agast-helpers/stream';
 
-import { parseTag } from '@bablr/agast-helpers/parsers';
 import {
   BindingTag,
   CloseNodeTag,
@@ -37,13 +36,14 @@ import {
 } from '@bablr/agast-helpers/path';
 import { m, o } from '@bablr/helpers/grammar';
 import { arrayLast, freeze, isObject } from '@bablr/agast-helpers/object';
-import { buildReferenceTag } from '@bablr/agast-helpers/builders';
-import { printObject, printSums, printTag } from '@bablr/agast-helpers/print';
+import { parseTag, buildReferenceTag, printObject, printSums, printTag } from 'agast';
+
 import { finished } from 'node:stream';
 
 let subtleCrypto = crypto.subtle;
 let digest_ = subtleCrypto.digest;
 let digest = (str) => digest_.call(subtleCrypto, 'SHA-512', Buffer.from(str));
+let porcelain = freezeRecord({ porcelain: true });
 
 // TODO move this somewhere else
 let hashNode = async (str) => {
@@ -196,7 +196,7 @@ function* __repoify(options, rootDir) {
 
     if (isOpen) {
       if (nodePath) stack.push({ nodePath, gaps });
-      nodePath = Path.fromTag(strTag);
+      nodePath = Path.fromTag(printTag(tag, porcelain));
     }
 
     if (tag.type === ShiftTag) {
@@ -212,7 +212,7 @@ function* __repoify(options, rootDir) {
       nodePath = nodePath.advance(`##${finishedHash}##`);
       nodePath = nodePath.advance(`<//>`);
     } else if (tag.type === GapTag || tag.type === NullTag) {
-      nodePath = nodePath.advance(Path.fromTag(strTag).node);
+      nodePath = nodePath.advance(Tags.from(strTag));
     } else if (!isOpen && !isClose) {
       nodePath = nodePath.advance(strTag);
     }
@@ -226,57 +226,38 @@ function* __repoify(options, rootDir) {
       let intrinsic = false;
 
       let property = stack.length ? arrayLast(stack).nodePath.childAt(-1) : null;
+      let ref = parseTag(property[0]);
 
       intrinsic =
         isObject(property) &&
-        ((!propertyIsFull(property) && property.value.reference?.flags.intrinsic) ||
-          ['#', '@'].includes(property.value.reference?.type));
+        ((!propertyIsFull(property) && ref.value.flags.intrinsic) ||
+          ['#', '@'].includes(ref.value.type));
 
       let hash = null;
       if (!intrinsic) {
-        let children = Tags.getValues(Tags.getTags(finishedNode))[1] || Tags.create();
+        let newTags = [];
+        // let children = finishedNode || Tags.create();
 
-        let tree = children;
-        let newTree = Tags.create(Tags.getFlags(children));
+        let tree = finishedNode;
+        let newTree = Tags.fromValues([tree[0]]);
         let idx = 0;
         let treeStack = [];
 
         while (tree) {
-          if (Tags.getDepth(tree) > 1 && idx < Tags.getValues(tree).length) {
+          if (Tags.getDepth(tree) > 1 && idx < tree.length) {
             treeStack.push({ tree, newTree, idx: idx + 1 });
-            tree = Tags.getValues(tree)[idx];
-            newTree = Tags.create(Tags.getFlags(tree));
+            tree = tree[idx];
+            newTree = Tags.fromValues([tree[0]]);
             idx = 0;
           } else {
             let _finishedTree = tree;
-            let finishedNewTree = Tags.getDepth(tree) === 1 ? tree : newTree;
+            let finishedNewTree = Tags.getDepth(tree) === 1 ? tree : Tags.push('</>', newTree);
 
             let frame = Tags.getDepth(tree) ? treeStack.pop() : null;
 
-            let startsWithShift = !finishedNode.value.flags.token
-              ? Tags.getAt(0, finishedNewTree)?.value.shift
-              : false;
-
-            let sigilTag =
-              Tags.getDepth(tree) < Tags.getDepth(children)
-                ? finishedNode.value.flags.object
-                  ? '<{__}>'
-                  : '<__>'
-                : getOpenTag(finishedNode);
-            let node = buildNode(
-              Tags.fromValues(
-                parseTag(sigilTag).value.selfClosing
-                  ? [sigilTag]
-                  : [sigilTag, finishedNewTree, '</>'],
-                flagsForSigilTag(sigilTag),
-                1,
-              ),
-            );
+            let node = finishedNewTree;
             let str = vcsPrint(node);
-            if (startsWithShift) {
-              throw new Error('check me');
-              str = `##${finishedHash}##${str} <__>`;
-            }
+
             hash = yield wait(hashNode(str));
             yield `##${hash}##`;
             yield* streamFromTree(node, freezeRecord({ sums: true }));
@@ -285,13 +266,16 @@ function* __repoify(options, rootDir) {
             if (frame) {
               ({ tree, newTree, idx } = frame);
 
-              let gapNode = buildNode(Tags.fromValues(['<//>']));
+              let gapNode = Tags.fromValues(['<//>']);
 
-              let tags_ = BList.fromValues(
-                ['__:', '', `##${hash}##`, printSums(Tags.buildSums(_finishedTree)), gapNode],
-                1,
-              );
-              let newProperty = buildPropertyTag(tags_);
+              let tags_ = Tags.fromValues([
+                '__:',
+                '',
+                `##${hash}##`,
+                printSums(Tags.sumNode(_finishedTree)),
+                gapNode,
+              ]);
+              let newProperty = tags_;
 
               newTree = Tags.push(newProperty, newTree);
             } else {
