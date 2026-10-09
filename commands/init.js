@@ -191,6 +191,8 @@ function* __repoify(options, rootDir) {
     let strTag = step.value;
     let tag = parseTag(strTag);
 
+    console.log(strTag);
+
     let isOpen = tag.type === OpenNodeTag;
     let isClose = tag.type === CloseNodeTag;
 
