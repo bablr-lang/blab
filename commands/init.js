@@ -198,7 +198,7 @@ function* __repoify(options, rootDir) {
 
     if (isOpen) {
       if (nodePath) stack.push({ nodePath, gaps });
-      nodePath = Path.fromTag(printTag(tag, porcelain));
+      nodePath = Path.advance(null, printTag(tag, porcelain));
     }
 
     if (tag.type === ShiftTag) {
