@@ -20,10 +20,10 @@ import { streamFromTree, printCSTML, hoist, treeFromStream } from '@bablr/agast-
 
 import {
   BindingTag,
-  CloseNodeTag,
+  CloseTag,
   GapTag,
   NullTag,
-  OpenNodeTag,
+  OpenTag,
   ReferenceTag,
   ShiftTag,
 } from '@bablr/agast-helpers/symbols';
@@ -94,7 +94,7 @@ function* __walkTree(rootDir, options) {
 
         yield tag_;
       }
-    } else if (tag.type === OpenNodeTag) {
+    } else if (tag.type === OpenTag) {
       path.push(tag);
 
       if (name && tag.value.name === Symbol.for('Dir')) {
@@ -103,7 +103,7 @@ function* __walkTree(rootDir, options) {
       if (!tag.value.type) {
         yield tag_;
       }
-    } else if (tag.type === CloseNodeTag) {
+    } else if (tag.type === CloseTag) {
       let open = path.pop();
       if (open.value.name === Symbol.for('Dir')) {
         names.pop();
@@ -193,8 +193,8 @@ function* __repoify(options, rootDir) {
 
     console.log(strTag);
 
-    let isOpen = tag.type === OpenNodeTag;
-    let isClose = tag.type === CloseNodeTag;
+    let isOpen = tag.type === OpenTag;
+    let isClose = tag.type === CloseTag;
 
     if (isOpen) {
       if (nodePath) stack.push({ nodePath, gaps });
