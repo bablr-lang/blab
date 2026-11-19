@@ -219,7 +219,7 @@ function* __repoify(options, rootDir) {
       nodePath = nodePath.advance(strTag);
     }
 
-    if (isClose || (isOpen && tag.value.selfClosing)) {
+    if (isClose || (isOpen && tag.value.isSelfClosing)) {
       if (isClose) {
         nodePath = nodePath.advance(strTag);
       }
